@@ -4,7 +4,7 @@ OLD
 output/*
 hdf/
 __pycache__
-aggregated/
+#aggregated/
 aggregated_orig/
 raw/
 tmp/
