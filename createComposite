@@ -1,0 +1,45 @@
+#! /usr/bin/env python
+
+#standard library imports
+import json
+from glob import glob
+
+
+SPAN = 'geo_10km'
+IMTTYPE = 'mmi'
+outputfile = 'output/allcells_%s.json' % IMTTYPE
+
+aggregated_template = './aggregated/*/aggregated_%s_%s.csv' % (SPAN,IMTTYPE)
+print('Looking for',aggregated_template)
+aggregatedfiles = glob(aggregated_template)
+print('Got',len(aggregatedfiles),'files.')
+
+allcells = {}
+n=0
+for jsonfile in aggregatedfiles:
+    n+=1
+    if not n % 100:
+        print('%i: allpts now has %i cells.' % (n,len(allcells)))
+
+    with open(jsonfile,'r') as f:
+        data = json.load(f)
+
+    evid=jsonfile.split('/')[2]
+    for utmcell,val in data.items():
+        eventdata = {'evid': evid, 'max': val}
+
+        if utmcell in allcells:
+            allcells[utmcell]['events'].append(eventdata)
+            if allcells[utmcell]['max']<val:
+                allcells[utmcell]['max']=val
+        else:
+            cell = {'max': val, 'evids': [eventdata]}
+            allcells[utmcell] = {'max': val, 'events': [eventdata]}
+
+for cell in allcells:
+    allcells[cell]['nevents'] = len(allcells[cell]['events'])
+
+print('%i: allpts finished with %i cells, saving.' % (n,len(allcells)))
+with open(outputfile,'w') as f:
+    print('Saving to',outputfile)
+    json.dump(allcells,f,indent=4)

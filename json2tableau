@@ -1,0 +1,58 @@
+#! /usr/bin/env python
+
+import json
+import csv
+
+import aggregate
+
+
+SPAN=10000
+inputfile = './output/allcells_mmi.json'
+
+with open(inputfile,'r') as f:
+    data=json.load(f)
+
+maxval=0
+maxnevents=0
+print('Got',len(data),'points.')
+
+with open('atlas_metadata.json','r') as f:
+    events=json.load(f)
+print('Got info for',len(events),'events.')
+
+summaryw = csv.writer(open('output/atlas_summary.csv','w'))
+detailw = csv.writer(open('output/atlas_detail.csv','w'))
+
+for k,v in data.items():
+    pt_val=v['max']
+    if pt_val>maxval:
+        maxval=pt_val
+    nevents=v['nevents']
+    if nevents>maxnevents:
+        maxnevents=nevents
+
+    lonlat=aggregate.getUtmPolyFromString(k,SPAN)['center']['coordinates']
+
+    maxid=None
+    for event in v['events']:
+        evid=event['evid']
+        ev_val=event['max']
+
+        if ev_val==pt_val:
+            maxid=evid
+
+        eventdata=events[evid]
+        mag=eventdata['magnitude']
+        otime=eventdata['origin_time']
+        
+        row=(k,lonlat[1],lonlat[0],evid,mag,ev_val,otime)
+        detailw.writerow(row)
+
+    row=(k,lonlat[1],lonlat[0],pt_val,maxid,nevents)
+    summaryw.writerow(row)
+
+print('Max mmi:',maxval,'Max nevents:',maxnevents)
+
+
+# Required output:
+# utm,lat,lon,maxmmi,maxpga,nevents

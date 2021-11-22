@@ -1,0 +1,131 @@
+#! /usr/bin/env python
+
+import os.path
+
+import numpy as np
+import json
+from glob import glob
+import datetime as dt
+
+from libcomcat.search import get_event_by_id
+import urllib.request
+
+from impactutils.io.smcontainers import ShakeMapOutputContainer
+from mapio.grid2d import Grid2D
+from mapio.geodict import GeoDict
+
+# For plotting
+from impactutils.colors.cpalette import ColorPalette
+import matplotlib.pyplot as plt
+palette = ColorPalette.fromPreset('mmi')
+
+metadatafile = './extents.json'
+hdf_dir = './hdf'
+outputfile = './hazard_data.json'
+
+IMTTYPE = 'MMI'
+pt_coords = (34.1377, -118.1253)
+lat,lon = pt_coords
+
+# Determine which events are relevant
+
+with open(metadatafile,'r') as f:
+    events = json.load(f)
+    print('Got',len(events),'events from',metadatafile)
+
+goodevents = []
+for event in events.values():
+    ex = event['extent']
+    if lat < float(ex['lat0']) or lat > float(ex['lat1']):
+        continue
+    if lon < float(ex['lon0']) or lon > float(ex['lon1']):
+        continue
+    goodevents.append(event)
+
+print('Got',len(goodevents),'events.')
+
+c=0
+for event in goodevents:
+    c+=1
+    evid = event['evid']
+    rawglob = '%s/%s/*_shake_result.hdf' % (hdf_dir,evid)
+    rawfiles = glob(rawglob)
+    if not rawfiles:
+        try:
+            evdata = get_event_by_id(evid)
+        except:
+            print('Could not get event data for',evid,'...skipping.')
+            continue
+
+        products = evdata.getProducts('shakemap',source='preferred')
+        hdf_url = products[0].getContentURL('shake_result.hdf')
+        if not hdf_url:
+            print('No url found for',evid,"...skipping.")
+            continue
+
+        print('%i: Downloading from %s' % (c,hdf_url))
+        os.mkdir(hdf_dir + '/' + evid)
+        hdf_file = '%s/%s/%s_shake_result.hdf' % (hdf_dir,evid,evid)
+        try:
+            urllib.request.urlretrieve(hdf_url,hdf_file)
+        except:
+            print('Could not download hdf for',evid,'...skipping.')
+
+    else:
+        hdf_file = rawfiles[0]
+
+    print('Examining',hdf_file)
+    container = ShakeMapOutputContainer.load(hdf_file)
+    try:
+        imtdict = container.getIMTGrids(IMTTYPE,'GREATER_OF_TWO_HORIZONTAL')
+    except:
+        print('Possible bad file for',evid,'...skipping.')
+        continue
+
+    mean_grid = Grid2D(imtdict['mean'], GeoDict(imtdict['mean_metadata']))
+    cdi = mean_grid.getValue(lat,lon,method='nearest')
+    event['cdi'] = cdi
+    eventtime = event['event']['origin_time']
+
+# Now write output
+
+with open(outputfile,'w') as f:
+    json.dump(goodevents,f,indent=4)
+
+# Determine interval
+
+fmt = '%Y-%m-%dT%H:%M:%S.%fZ'
+dates = [dt.datetime.strptime(x['event']['origin_time'],fmt) for x in goodevents]
+print('Start time:', min(dates))
+print('End time:', max(dates))
+interval = (max(dates) - min(dates)).total_seconds() / 3.154e+7
+interval = 120
+print('Interval:',interval,'years')
+
+
+cdis = [x['cdi'] for x in goodevents if 'cdi' in x]
+x=[]
+y=[]
+for mi in np.arange(1,10,0.1):
+    c = len([x for x in cdis if x >= mi]) / interval
+    x.append(mi)
+    y.append(c)
+
+
+# colors = [palette.getDataColor(x['cdi'],color_format='hex') for x in results.values()]
+
+ax = plt.subplot(111)
+ax.plot(x, y)
+plt.suptitle('Atlas Felt Events: %s,%s' % (lat,lon))
+plt.title('Events: 1901 to 2020')
+plt.ylabel('Annual rate of exceedance')
+plt.xlabel('Intensity')
+plt.yscale('log')
+plt.xlim(2,9)
+plt.ylim(0.01,10)
+
+outfile = 'sm_hazard_curve.pdf'
+plt.savefig(outfile)
+
+
+exit()

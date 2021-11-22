@@ -1,0 +1,12 @@
+OLD
+.DS*
+*.pdf
+output/*
+hdf/
+__pycache__
+aggregated/
+aggregated_orig/
+raw/
+tmp/
+*.orig
+

@@ -1,0 +1,49 @@
+#! /usr/bin/env python
+
+#standard library imports
+import urllib.request
+import json
+from glob import glob
+import os
+
+#third party imports
+# import matplotlib.pyplot as plt
+
+REDO = False
+SPAN = 'geo_10km'
+outputfile = './output/allevents.json'
+
+aggregated_template = './aggregated/*/aggregated_%s.json' % SPAN
+query_template = 'https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&eventid=EVID&contributor=atlas'
+print('Looking for',aggregated_template)
+aggregatedfiles = glob(aggregated_template)
+
+print('Got',len(aggregatedfiles),'files.')
+
+n=0
+allevents = {}
+if (not os.isfile(outputfile)) or REDO:
+    for jsonfile in aggregatedfiles:
+        n+=1
+        evid = jsonfile.split('/')[-2]
+        query = query_template.replace('EVID',evid)
+
+        if not n % 10:
+            print('%i: processing %s.' % (n,jsonfile))
+
+        print('Querying:', query)
+        with urllib.request.urlopen(query) as fh:
+            data = fh.read().decode('utf-8')
+            data = json.loads(data)
+            data['properties'].pop('products',None)
+
+            allevents[evid] = data
+
+    with open('output/allevents.json','w') as f:
+        json.dump(allevents,f,indent=4)
+
+else:
+    with open(outputfile,'r') as f:
+        allevents = json.load(f)
+
+print('Got',len(allevents),'events.')

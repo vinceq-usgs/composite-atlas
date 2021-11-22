@@ -1,0 +1,109 @@
+#! /usr/bin/env python
+
+import glob
+import os.path
+from shutil import copy
+
+import numpy as np
+import json
+from math import ceil
+
+from impactutils.io.smcontainers import ShakeMapOutputContainer
+from mapio.geodict import GeoDict
+from mapio.grid2d import Grid2D
+from geopy.distance import great_circle
+import aggregate
+
+REDO = False
+SPAN = 'geo_10km'
+MITYPE = 'mmi'
+aggfile_template = './aggregated/EVID/aggregated_SPAN_MITYPE.csv'
+to_find = 'hdf/*/*_shake_result.hdf'
+# to_find = './atlas-reviewed/*/current/products/shake_result.hdf'
+
+
+def aggregateShakeMap(aggfile, hdf_file):
+    print('Reading',hdf_file)
+    tmpfile = 'tmp/tmp.hdf'
+    copy(hdf_file,tmpfile)
+    shake_data = ShakeMapOutputContainer.load(tmpfile)
+    mmigrid = shake_data.getIMTGrids(MITYPE.upper(),'GREATER_OF_TWO_HORIZONTAL')
+    imtdata = np.nan_to_num(mmigrid['mean'])
+    grid = GeoDict(mmigrid['mean_metadata'])
+    imtgrid = Grid2D(imtdata, grid)
+
+    mmis={}
+    n = 0
+    for i in range(0,grid.ny):
+        for j in range(0,grid.nx):
+            n+=1
+            val = imtgrid._data[i,j]
+            val = float('%.1f' % float(val))
+            thislat,thislon = imtgrid.getLatLon(i,j)
+
+            gridcell = aggregate.getUtmFromCoordinates(thislat,thislon,span=SPAN)
+            if not gridcell:
+                continue
+            k = gridcell
+            if k not in mmis or mmis[k]<val:
+                mmis[k] = val
+
+    # print('Value at',x,y,'is',imtgrid.getValue(y,x))
+    print('Writing, reduced',n,'grid points to',len(mmis),'cells.')
+    expectedpts = getExpectedPts(imtgrid,grid.nx,grid.ny)
+    jsondata = json.dumps(mmis,indent=4)
+    os.makedirs(os.path.dirname(aggfile),exist_ok=True)
+    with open(aggfile,'w') as fh:
+        fh.write(jsondata)
+    print('Saved',aggfile)
+
+    if len(mmis)<expectedpts*.95:
+        print('Expected',expectedpts,'pts.')
+        exit()
+
+    return aggfile
+
+
+def getExpectedPts(imtgrid,nx,ny):
+    p0=imtgrid.getLatLon(ny,0)
+    p1=imtgrid.getLatLon(ny,nx)
+    p2=imtgrid.getLatLon(0,nx)
+    p3=imtgrid.getLatLon(0,0)
+    a=great_circle(p0,p1).kilometers
+    b=great_circle(p1,p2).kilometers
+    c=great_circle(p2,p3).kilometers
+
+    npts_x=min(ceil(a/10),ceil(b/10))
+    npts_y=ceil(b/10)
+    expectedn = npts_x*npts_y
+    print('Expect',npts_x,'x',npts_y,'or',expectedn)
+
+    return expectedn
+
+
+print('Looking for',to_find)
+hdf_files_array = glob.glob(to_find)
+
+hdf_files = {}
+for name in hdf_files_array:
+    evid = name.split('/')[-1].replace('_shake_result.hdf','')
+
+    hdf_files[evid] = name
+
+print('Found',len(hdf_files),'HDF files.')
+
+aggfiles = {}
+for evid,hdf_file in hdf_files.items():
+    aggfile = aggfile_template.replace('EVID',evid).replace('SPAN',SPAN).replace('MITYPE',MITYPE)
+    if os.path.isfile(aggfile) and os.path.getsize(aggfile)>0 and not REDO:
+        print('Skipping',aggfile)
+        continue
+
+    aggfile = aggregateShakeMap(aggfile,hdf_file)
+    if not (os.path.isfile(aggfile) and os.path.getsize(aggfile)>0):
+        print('Could not aggregate event',evid,'...ignoring.')
+        continue
+
+    aggfiles[evid] = aggfile
+
+print('Finished',len(aggfiles),'events.')

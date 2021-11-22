@@ -1,0 +1,48 @@
+#! /usr/bin/env python
+
+import os.path
+
+import numpy as np
+import json
+from glob import glob
+
+from libcomcat.search import get_event_by_id
+import urllib.request
+import json
+
+REDO=False
+hdf_dir = './hdf'
+
+metadatafile = 'atlas_metadata.json'
+with open(metadatafile,'r') as f:
+    events = json.load(f)
+    print('Got',len(events),'events from',metadatafile)
+
+c=0
+for evid,event in events.items():
+    c+=1
+    rawglob = '%s/%s/*_shake_result.hdf' % (hdf_dir,evid)
+    results=glob(rawglob)
+    if REDO or not results:
+        evdata = get_event_by_id(evid,catalog='atlas')
+        if not evdata:
+            print('No data found for',evid)
+            exit()
+        try:
+            products = evdata.getProducts('shakemap',source='atlas')
+        except:
+            print(c,': No atlas data for',evid,'...skipping.')
+            continue
+
+        os.makedirs(hdf_dir + '/' + evid,exist_ok=True)
+        try:
+            hdf_file = '%s/%s/%s_shake_result.hdf' % (hdf_dir,evid,evid)
+            products[0].getContent('shake_result.hdf',hdf_file)
+        except:
+            print(c,': Could not download hdf for',evid)
+            continue
+
+    else:
+        hdf_file = results[0]
+        #print('Already got',hdf_file)
+
