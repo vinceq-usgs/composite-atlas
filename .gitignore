@@ -9,4 +9,5 @@ aggregated_orig/
 raw/
 tmp/
 *.orig
+*.png
 
